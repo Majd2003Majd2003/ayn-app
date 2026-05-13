@@ -1,5 +1,5 @@
 name: ayn_app
-description: AYN - Smart Vision Assistant for the Blind
+description: AYN
 publish_to: 'none'
 version: 1.3.0+3
 
@@ -13,8 +13,8 @@ dependencies:
   flutter_tts: 3.8.5
   speech_to_text: 6.6.0
   vibration: 1.8.4
-  permission_handler: 11.3.1
-  geolocator: 10.1.0
+  permission_handler: 10.4.5
+  geolocator: 9.0.2
   flutter_compass: 0.8.0
   shared_preferences: 2.2.2
   cupertino_icons: 1.0.6
