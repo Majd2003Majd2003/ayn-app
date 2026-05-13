@@ -1,9 +1,3 @@
-// ============================================================
-//  تطبيق عَيْن (AYN) — مساعد المكفوفين
-//  النسخة المبسطة v1.0
-//  المهندس: مجد الدين الدكاك
-// ============================================================
-
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:speech_to_text/speech_to_text.dart' as stt;
@@ -43,7 +37,7 @@ class _HomeScreenState extends State<HomeScreen> {
   final FlutterTts _tts = FlutterTts();
   final stt.SpeechToText _speech = stt.SpeechToText();
   
-  bool _isReady = false;
+  bool _speechAvailable = false;
   bool _isListening = false;
   String _lastWords = "";
   String _statusMessage = "جاري التهيئة...";
@@ -60,13 +54,19 @@ class _HomeScreenState extends State<HomeScreen> {
     await _setupSpeech();
     
     setState(() {
-      _isReady = true;
-      _statusMessage = "جاهز";
+      _statusMessage = _speechAvailable 
+          ? "اضغط الميكروفون للتحدث" 
+          : "استخدم الأزرار أدناه";
     });
     
     await _speak("أهلاً يا مجد الدين، أنا عَيْن، مساعدك الذكي");
     await Future.delayed(const Duration(seconds: 1));
-    await _speak("اضغط في أي مكان على الشاشة للتحدث معي");
+    
+    if (_speechAvailable) {
+      await _speak("اضغط الميكروفون الكبير وتحدث، أو استخدم الأزرار في الأسفل");
+    } else {
+      await _speak("استخدم الأزرار الكبيرة في الشاشة، اضغط على أي زر للأمر");
+    }
   }
   
   Future<void> _requestPermissions() async {
@@ -81,13 +81,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   
   Future<void> _setupSpeech() async {
-    bool available = await _speech.initialize(
-      onError: (error) => print("Speech error: $error"),
-      onStatus: (status) => print("Speech status: $status"),
-    );
-    
-    if (!available) {
-      _speak("لا يمكنني الاستماع، تحقق من الإعدادات");
+    try {
+      _speechAvailable = await _speech.initialize(
+        onError: (error) {
+          print("Speech error: ${error.errorMsg}");
+        },
+        onStatus: (status) {
+          print("Speech status: $status");
+        },
+      );
+    } catch (e) {
+      _speechAvailable = false;
     }
   }
   
@@ -102,16 +106,9 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
   
-  Future<void> _vibrateSuccess() async {
-    final hasVibrator = await Vibration.hasVibrator() ?? false;
-    if (hasVibrator) {
-      Vibration.vibrate(pattern: [0, 100, 100, 100]);
-    }
-  }
-  
   Future<void> _startListening() async {
-    if (!_speech.isAvailable) {
-      await _speak("الاستماع غير متاح");
+    if (!_speechAvailable) {
+      await _speak("الاستماع غير متاح، استخدم الأزرار من فضلك");
       return;
     }
     
@@ -126,29 +123,26 @@ class _HomeScreenState extends State<HomeScreen> {
     await _speak("نعم");
     
     await _speech.listen(
-      onResult: _onSpeechResult,
+      onResult: (result) {
+        if (result.finalResult) {
+          setState(() {
+            _lastWords = result.recognizedWords;
+            _isListening = false;
+            _statusMessage = "جاهز";
+          });
+          _processCommand(result.recognizedWords);
+        }
+      },
       localeId: "ar-SA",
       listenFor: const Duration(seconds: 10),
       pauseFor: const Duration(seconds: 3),
     );
   }
   
-  void _onSpeechResult(result) {
-    if (result.finalResult) {
-      setState(() {
-        _lastWords = result.recognizedWords;
-        _isListening = false;
-        _statusMessage = "جاهز";
-      });
-      _processCommand(result.recognizedWords);
-    }
-  }
-  
   Future<void> _processCommand(String command) async {
     final cmd = command.toLowerCase().trim();
-    print("Command: $cmd");
     
-    await _vibrateSuccess();
+    await _vibrate(duration: 100);
     
     if (cmd.contains("كم الساعة") || cmd.contains("الوقت") || cmd.contains("ساعة")) {
       await _tellTime();
@@ -172,7 +166,7 @@ class _HomeScreenState extends State<HomeScreen> {
       await _tts.stop();
     }
     else {
-      await _speak("سمعت: $cmd. لكني لم أفهم، حاول مرة أخرى");
+      await _speak("لم أفهم، استخدم الأزرار من فضلك");
     }
   }
   
@@ -186,9 +180,29 @@ class _HomeScreenState extends State<HomeScreen> {
     await _speak("الساعة $displayHour و $minute دقيقة $period");
   }
   
-  void _onScreenTap() {
-    if (_isListening) return;
-    _startListening();
+  Future<void> _greetCommand() async {
+    await _vibrate(duration: 100);
+    await _speak("أهلاً وسهلاً يا مجد الدين، كيف حالك");
+  }
+  
+  Future<void> _introCommand() async {
+    await _vibrate(duration: 100);
+    await _speak("أنا عَيْن، مساعد ذكي للأشخاص ذوي الإعاقة البصرية");
+  }
+  
+  Future<void> _countCommand() async {
+    await _vibrate(duration: 100);
+    await _speak("واحد، اثنان، ثلاثة، أربعة، خمسة");
+  }
+  
+  Future<void> _thanksCommand() async {
+    await _vibrate(duration: 100);
+    await _speak("على الرحب والسعة، أنا هنا لمساعدتك");
+  }
+  
+  Future<void> _stopCommand() async {
+    await _vibrate(duration: 50);
+    await _tts.stop();
   }
   
   @override
@@ -198,87 +212,161 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
   
+  Widget _buildCommandButton({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: color,
+      borderRadius: BorderRadius.circular(15),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(15),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: Colors.white, size: 36),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: GestureDetector(
-        onTap: _onScreenTap,
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(20.0),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  "عَيْن",
-                  style: TextStyle(
-                    fontSize: 100,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              
+              const Text(
+                "عَيْن",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 70,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
                 ),
-                const SizedBox(height: 30),
-                Container(
-                  width: 200,
-                  height: 200,
+              ),
+              
+              const SizedBox(height: 10),
+              
+              // الميكروفون - يعمل لمن لديه إعدادات صوت جاهزة
+              GestureDetector(
+                onTap: _startListening,
+                child: Container(
+                  width: 130,
+                  height: 130,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: _isListening 
                         ? Colors.red.shade700 
-                        : Colors.blue.shade700,
+                        : (_speechAvailable ? Colors.blue.shade700 : Colors.grey.shade800),
                   ),
                   child: Icon(
                     _isListening ? Icons.mic : Icons.mic_none,
                     color: Colors.white,
-                    size: 100,
+                    size: 70,
                   ),
                 ),
-                const SizedBox(height: 40),
-                Text(
-                  _statusMessage,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 32,
-                    fontWeight: FontWeight.bold,
-                  ),
+              ),
+              
+              const SizedBox(height: 10),
+              
+              Text(
+                _statusMessage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 16,
                 ),
-                const SizedBox(height: 20),
-                if (_lastWords.isNotEmpty)
-                  Container(
-                    padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade900,
-                      borderRadius: BorderRadius.circular(15),
+              ),
+              
+              const SizedBox(height: 20),
+              
+              const Text(
+                "أو اضغط على الأمر مباشرة:",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 14),
+              ),
+              
+              const SizedBox(height: 12),
+              
+              // شبكة الأزرار
+              Expanded(
+                child: GridView.count(
+                  crossAxisCount: 2,
+                  childAspectRatio: 1.4,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                  children: [
+                    _buildCommandButton(
+                      label: "كم الساعة",
+                      icon: Icons.access_time,
+                      color: Colors.blue.shade700,
+                      onTap: _tellTime,
                     ),
-                    child: Text(
-                      "سمعت: $_lastWords",
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 20,
-                      ),
-                      textAlign: TextAlign.center,
+                    _buildCommandButton(
+                      label: "مرحبا",
+                      icon: Icons.waving_hand,
+                      color: Colors.green.shade700,
+                      onTap: _greetCommand,
                     ),
-                  ),
-                const Spacer(),
-                const Text(
-                  "اضغط في أي مكان للتحدث",
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 18,
-                  ),
-                  textAlign: TextAlign.center,
+                    _buildCommandButton(
+                      label: "من أنت",
+                      icon: Icons.info,
+                      color: Colors.purple.shade700,
+                      onTap: _introCommand,
+                    ),
+                    _buildCommandButton(
+                      label: "عد لي",
+                      icon: Icons.format_list_numbered,
+                      color: Colors.orange.shade700,
+                      onTap: _countCommand,
+                    ),
+                    _buildCommandButton(
+                      label: "شكرا",
+                      icon: Icons.favorite,
+                      color: Colors.pink.shade700,
+                      onTap: _thanksCommand,
+                    ),
+                    _buildCommandButton(
+                      label: "اسكت",
+                      icon: Icons.volume_off,
+                      color: Colors.red.shade700,
+                      onTap: _stopCommand,
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 20),
-                const Text(
-                  "AYN v1.0 — Majd Aldin",
-                  style: TextStyle(
-                    color: Colors.white38,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
+              ),
+              
+              const SizedBox(height: 10),
+              
+              const Text(
+                "AYN v1.1 — Majd Aldin",
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 11),
+              ),
+            ],
           ),
         ),
       ),
