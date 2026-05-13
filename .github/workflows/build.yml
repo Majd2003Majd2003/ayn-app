@@ -30,6 +30,25 @@ jobs:
       - name: Flutter doctor
         run: flutter doctor -v
       
+      - name: Backup my files
+        run: |
+          mkdir /tmp/backup
+          cp pubspec.yaml /tmp/backup/
+          cp -r lib /tmp/backup/
+      
+      - name: Create fresh Flutter project
+        run: |
+          cd ..
+          rm -rf ayn-app
+          flutter create --project-name ayn_app --org com.majd ayn-app
+          cd ayn-app
+      
+      - name: Restore my files
+        run: |
+          cp /tmp/backup/pubspec.yaml ./pubspec.yaml
+          rm -rf lib
+          cp -r /tmp/backup/lib ./lib
+      
       - name: Install dependencies
         run: flutter pub get
       
@@ -42,3 +61,8 @@ jobs:
           name: ayn-app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 90
+      
+      - name: Show APK info
+        run: |
+          echo "Build Successful!"
+          ls -lh build/app/outputs/flutter-apk/
