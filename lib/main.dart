@@ -39,6 +39,8 @@ class _HomeScreenState extends State<HomeScreen> {
   
   bool _speechAvailable = false;
   bool _isListening = false;
+  bool _isSpeaking = false;
+  bool _autoListenEnabled = true;
   String _lastWords = "";
   String _statusMessage = "جاري التهيئة...";
   
@@ -54,19 +56,16 @@ class _HomeScreenState extends State<HomeScreen> {
     await _setupSpeech();
     
     setState(() {
-      _statusMessage = _speechAvailable 
-          ? "اضغط الميكروفون للتحدث" 
-          : "استخدم الأزرار أدناه";
+      _statusMessage = "جاهز";
     });
     
     await _speak("أهلاً يا مجد الدين، أنا عَيْن، مساعدك الذكي");
-    await Future.delayed(const Duration(seconds: 1));
+    await Future.delayed(const Duration(milliseconds: 800));
+    await _speak("سأستمع إليك دائماً، تكلم وسأرد");
+    await Future.delayed(const Duration(milliseconds: 500));
     
-    if (_speechAvailable) {
-      await _speak("اضغط الميكروفون الكبير وتحدث، أو استخدم الأزرار في الأسفل");
-    } else {
-      await _speak("استخدم الأزرار الكبيرة في الشاشة، اضغط على أي زر للأمر");
-    }
+    // بدء الاستماع التلقائي
+    _startContinuousListening();
   }
   
   Future<void> _requestPermissions() async {
@@ -78,6 +77,20 @@ class _HomeScreenState extends State<HomeScreen> {
     await _tts.setSpeechRate(0.5);
     await _tts.setVolume(1.0);
     await _tts.setPitch(1.0);
+    
+    // عند انتهاء النطق، نعود للاستماع
+    _tts.setCompletionHandler(() {
+      setState(() => _isSpeaking = false);
+      if (_autoListenEnabled && !_isListening) {
+        Future.delayed(const Duration(milliseconds: 300), () {
+          _startContinuousListening();
+        });
+      }
+    });
+    
+    _tts.setStartHandler(() {
+      setState(() => _isSpeaking = true);
+    });
   }
   
   Future<void> _setupSpeech() async {
@@ -85,9 +98,28 @@ class _HomeScreenState extends State<HomeScreen> {
       _speechAvailable = await _speech.initialize(
         onError: (error) {
           print("Speech error: ${error.errorMsg}");
+          // إعادة المحاولة بعد الخطأ
+          if (_autoListenEnabled) {
+            Future.delayed(const Duration(seconds: 1), () {
+              if (!_isListening && !_isSpeaking) {
+                _startContinuousListening();
+              }
+            });
+          }
         },
         onStatus: (status) {
           print("Speech status: $status");
+          // عند انتهاء الاستماع، نعيد البدء
+          if (status == "done" || status == "notListening") {
+            setState(() => _isListening = false);
+            if (_autoListenEnabled && !_isSpeaking) {
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (!_isListening && !_isSpeaking) {
+                  _startContinuousListening();
+                }
+              });
+            }
+          }
         },
       );
     } catch (e) {
@@ -96,77 +128,137 @@ class _HomeScreenState extends State<HomeScreen> {
   }
   
   Future<void> _speak(String text) async {
+    // إيقاف الاستماع قبل النطق
+    if (_isListening) {
+      await _speech.stop();
+      setState(() => _isListening = false);
+    }
     await _tts.speak(text);
   }
   
-  Future<void> _vibrate({int duration = 100}) async {
+  Future<void> _vibrate({int duration = 80}) async {
     final hasVibrator = await Vibration.hasVibrator() ?? false;
     if (hasVibrator) {
       Vibration.vibrate(duration: duration);
     }
   }
   
-  Future<void> _startListening() async {
-    if (!_speechAvailable) {
-      await _speak("الاستماع غير متاح، استخدم الأزرار من فضلك");
-      return;
+  Future<void> _startContinuousListening() async {
+    if (!_speechAvailable) return;
+    if (_isListening) return;
+    if (_isSpeaking) return;
+    
+    try {
+      setState(() {
+        _isListening = true;
+        _statusMessage = "أستمع...";
+      });
+      
+      await _speech.listen(
+        onResult: (result) {
+          if (result.finalResult) {
+            final words = result.recognizedWords;
+            if (words.isNotEmpty) {
+              setState(() {
+                _lastWords = words;
+                _isListening = false;
+              });
+              _processCommand(words);
+            }
+          }
+        },
+        localeId: "ar-SA",
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 3),
+        cancelOnError: false,
+      );
+    } catch (e) {
+      print("Listen error: $e");
+      setState(() => _isListening = false);
     }
-    
-    await _vibrate(duration: 50);
-    
-    setState(() {
-      _isListening = true;
-      _statusMessage = "أستمع إليك...";
-      _lastWords = "";
-    });
-    
-    await _speak("نعم");
-    
-    await _speech.listen(
-      onResult: (result) {
-        if (result.finalResult) {
-          setState(() {
-            _lastWords = result.recognizedWords;
-            _isListening = false;
-            _statusMessage = "جاهز";
-          });
-          _processCommand(result.recognizedWords);
-        }
-      },
-      localeId: "ar-SA",
-      listenFor: const Duration(seconds: 10),
-      pauseFor: const Duration(seconds: 3),
-    );
   }
   
   Future<void> _processCommand(String command) async {
     final cmd = command.toLowerCase().trim();
+    print("Command received: $cmd");
     
     await _vibrate(duration: 100);
     
-    if (cmd.contains("كم الساعة") || cmd.contains("الوقت") || cmd.contains("ساعة")) {
+    // ==== أوامر الوقت ====
+    if (cmd.contains("كم الساعه") || cmd.contains("كم الساعة") || 
+        cmd.contains("الوقت") || cmd.contains("ساعه") || cmd.contains("ساعة")) {
       await _tellTime();
     }
-    else if (cmd.contains("مرحبا") || cmd.contains("السلام") || cmd.contains("اهلا")) {
-      await _speak("أهلاً وسهلاً يا مجد الدين، كيف حالك");
+    
+    // ==== التحية والسلام ====
+    else if (cmd.contains("مرحبا") || cmd.contains("اهلا") || cmd.contains("أهلا") ||
+             cmd.contains("هلا") || cmd.contains("سلام") || cmd.contains("صباح") ||
+             cmd.contains("مساء")) {
+      await _speak("أهلاً وسهلاً يا مجد الدين، أنا في خدمتك");
     }
-    else if (cmd.contains("اسمك") || cmd.contains("ما اسمك")) {
-      await _speak("أنا عَيْن، مساعدك الذكي للتنقل والقراءة");
+    
+    // ==== سؤال عن الحال ====
+    else if (cmd.contains("كيف حالك") || cmd.contains("كيفك") || 
+             cmd.contains("شلونك") || cmd.contains("كيف الحال")) {
+      await _speak("الحمد لله أنا بخير، كيف يمكنني مساعدتك");
     }
-    else if (cmd.contains("شكرا") || cmd.contains("شكراً")) {
-      await _speak("على الرحب والسعة، أنا هنا لمساعدتك");
+    
+    // ==== التعريف ====
+    else if (cmd.contains("اسمك") || cmd.contains("شو اسمك") || 
+             cmd.contains("ما اسمك") || cmd.contains("مين انت") ||
+             cmd.contains("من انت") || cmd.contains("شو انت") || 
+             cmd.contains("عرفني عليك") || cmd.contains("عرف نفسك")) {
+      await _speak("أنا عَيْن، مساعد ذكي للأشخاص ذوي الإعاقة البصرية، أساعدك على التنقل والقراءة");
     }
-    else if (cmd.contains("من انت") || cmd.contains("شو انت")) {
-      await _speak("أنا عَيْن، مساعد ذكي للأشخاص ذوي الإعاقة البصرية");
+    
+    // ==== الشكر ====
+    else if (cmd.contains("شكرا") || cmd.contains("شكر") || 
+             cmd.contains("مشكور") || cmd.contains("يعطيك العافية")) {
+      await _speak("على الرحب والسعة، أنا هنا لمساعدتك دائماً");
     }
-    else if (cmd.contains("عد") || cmd.contains("احسب")) {
-      await _speak("واحد، اثنان، ثلاثة، أربعة، خمسة");
+    
+    // ==== العد ====
+    else if (cmd.contains("عد") || cmd.contains("احسب") || cmd.contains("عد لي")) {
+      await _speak("واحد، اثنان، ثلاثة، أربعة، خمسة، ستة، سبعة، ثمانية، تسعة، عشرة");
     }
-    else if (cmd.contains("اسكت") || cmd.contains("توقف")) {
+    
+    // ==== التاريخ ====
+    else if (cmd.contains("التاريخ") || cmd.contains("اليوم") || 
+             cmd.contains("شو اليوم") || cmd.contains("ايام")) {
+      await _tellDate();
+    }
+    
+    // ==== الإيقاف ====
+    else if (cmd.contains("اسكت") || cmd.contains("توقف") || 
+             cmd.contains("اوقف") || cmd.contains("صمت")) {
       await _tts.stop();
+      _autoListenEnabled = false;
+      await _vibrate(duration: 200);
+      await Future.delayed(const Duration(seconds: 5));
+      _autoListenEnabled = true;
+      _startContinuousListening();
     }
+    
+    // ==== المساعدة ====
+    else if (cmd.contains("ساعدني") || cmd.contains("مساعدة") || 
+             cmd.contains("شو الاوامر") || cmd.contains("اوامر")) {
+      await _speak("يمكنك أن تسألني عن الوقت، التاريخ، أو تقول مرحبا، شكراً، أو كيف حالك");
+    }
+    
+    // ==== الوداع ====
+    else if (cmd.contains("باي") || cmd.contains("مع السلامة") || 
+             cmd.contains("الى اللقاء") || cmd.contains("وداعا")) {
+      await _speak("مع السلامة يا مجد الدين، أنا هنا متى احتجتني");
+    }
+    
+    // ==== اسمي / أنا ====
+    else if (cmd.contains("اسمي") || cmd.contains("انا مجد")) {
+      await _speak("أهلاً يا مجد الدين، يسعدني التحدث معك");
+    }
+    
+    // ==== لم أفهم ====
     else {
-      await _speak("لم أفهم، استخدم الأزرار من فضلك");
+      await _speak("لم أفهم تماماً، قل مرحبا أو اسألني عن الوقت");
     }
   }
   
@@ -177,32 +269,31 @@ class _HomeScreenState extends State<HomeScreen> {
     final period = hour >= 12 ? "مساءً" : "صباحاً";
     final displayHour = hour > 12 ? hour - 12 : (hour == 0 ? 12 : hour);
     
-    await _speak("الساعة $displayHour و $minute دقيقة $period");
+    String minuteText;
+    if (minute == 0) {
+      minuteText = "تماماً";
+    } else {
+      minuteText = "و $minute دقيقة";
+    }
+    
+    await _speak("الساعة الآن $displayHour $minuteText $period");
   }
   
-  Future<void> _greetCommand() async {
-    await _vibrate(duration: 100);
-    await _speak("أهلاً وسهلاً يا مجد الدين، كيف حالك");
-  }
-  
-  Future<void> _introCommand() async {
-    await _vibrate(duration: 100);
-    await _speak("أنا عَيْن، مساعد ذكي للأشخاص ذوي الإعاقة البصرية");
-  }
-  
-  Future<void> _countCommand() async {
-    await _vibrate(duration: 100);
-    await _speak("واحد، اثنان، ثلاثة، أربعة، خمسة");
-  }
-  
-  Future<void> _thanksCommand() async {
-    await _vibrate(duration: 100);
-    await _speak("على الرحب والسعة، أنا هنا لمساعدتك");
-  }
-  
-  Future<void> _stopCommand() async {
-    await _vibrate(duration: 50);
-    await _tts.stop();
+  Future<void> _tellDate() async {
+    final now = DateTime.now();
+    final months = [
+      "يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو",
+      "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"
+    ];
+    final days = [
+      "الإثنين", "الثلاثاء", "الأربعاء", "الخميس", 
+      "الجمعة", "السبت", "الأحد"
+    ];
+    
+    final dayName = days[now.weekday - 1];
+    final monthName = months[now.month - 1];
+    
+    await _speak("اليوم $dayName، ${now.day} $monthName ${now.year}");
   }
   
   @override
@@ -212,159 +303,116 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
   
-  Widget _buildCommandButton({
-    required String label,
-    required IconData icon,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Material(
-      color: color,
-      borderRadius: BorderRadius.circular(15),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(15),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, color: Colors.white, size: 36),
-              const SizedBox(height: 8),
-              Text(
-                label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-  
   @override
   Widget build(BuildContext context) {
+    Color circleColor;
+    String statusText;
+    IconData centerIcon;
+    
+    if (_isSpeaking) {
+      circleColor = Colors.purple.shade700;
+      statusText = "أتحدث...";
+      centerIcon = Icons.volume_up;
+    } else if (_isListening) {
+      circleColor = Colors.red.shade700;
+      statusText = "أستمع إليك...";
+      centerIcon = Icons.mic;
+    } else {
+      circleColor = Colors.blue.shade700;
+      statusText = _statusMessage;
+      centerIcon = Icons.hearing;
+    }
+    
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16.0),
+          padding: const EdgeInsets.all(20.0),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
               
               const Text(
                 "عَيْن",
-                textAlign: TextAlign.center,
                 style: TextStyle(
-                  fontSize: 70,
+                  fontSize: 100,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),
               ),
               
-              const SizedBox(height: 10),
+              const SizedBox(height: 40),
               
-              // الميكروفون - يعمل لمن لديه إعدادات صوت جاهزة
-              GestureDetector(
-                onTap: _startListening,
-                child: Container(
-                  width: 130,
-                  height: 130,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _isListening 
-                        ? Colors.red.shade700 
-                        : (_speechAvailable ? Colors.blue.shade700 : Colors.grey.shade800),
-                  ),
-                  child: Icon(
-                    _isListening ? Icons.mic : Icons.mic_none,
-                    color: Colors.white,
-                    size: 70,
-                  ),
+              // الدائرة المتغيرة حسب الحالة
+              Container(
+                width: 250,
+                height: 250,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: circleColor,
+                  boxShadow: [
+                    BoxShadow(
+                      color: circleColor.withOpacity(0.5),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  centerIcon,
+                  color: Colors.white,
+                  size: 120,
                 ),
               ),
               
-              const SizedBox(height: 10),
+              const SizedBox(height: 40),
               
               Text(
-                _statusMessage,
-                textAlign: TextAlign.center,
+                statusText,
                 style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
+                  color: Colors.white,
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
               
               const SizedBox(height: 20),
               
+              if (_lastWords.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade900,
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: Text(
+                    "سمعت: $_lastWords",
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              
+              const Spacer(),
+              
               const Text(
-                "أو اضغط على الأمر مباشرة:",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white60, fontSize: 14),
-              ),
-              
-              const SizedBox(height: 12),
-              
-              // شبكة الأزرار
-              Expanded(
-                child: GridView.count(
-                  crossAxisCount: 2,
-                  childAspectRatio: 1.4,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
-                  children: [
-                    _buildCommandButton(
-                      label: "كم الساعة",
-                      icon: Icons.access_time,
-                      color: Colors.blue.shade700,
-                      onTap: _tellTime,
-                    ),
-                    _buildCommandButton(
-                      label: "مرحبا",
-                      icon: Icons.waving_hand,
-                      color: Colors.green.shade700,
-                      onTap: _greetCommand,
-                    ),
-                    _buildCommandButton(
-                      label: "من أنت",
-                      icon: Icons.info,
-                      color: Colors.purple.shade700,
-                      onTap: _introCommand,
-                    ),
-                    _buildCommandButton(
-                      label: "عد لي",
-                      icon: Icons.format_list_numbered,
-                      color: Colors.orange.shade700,
-                      onTap: _countCommand,
-                    ),
-                    _buildCommandButton(
-                      label: "شكرا",
-                      icon: Icons.favorite,
-                      color: Colors.pink.shade700,
-                      onTap: _thanksCommand,
-                    ),
-                    _buildCommandButton(
-                      label: "اسكت",
-                      icon: Icons.volume_off,
-                      color: Colors.red.shade700,
-                      onTap: _stopCommand,
-                    ),
-                  ],
+                "تكلم بأي وقت، أنا أستمع",
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 18,
                 ),
               ),
               
               const SizedBox(height: 10),
               
               const Text(
-                "AYN v1.1 — Majd Aldin",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38, fontSize: 11),
+                "AYN v1.2 — Always Listening",
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 12,
+                ),
               ),
             ],
           ),
