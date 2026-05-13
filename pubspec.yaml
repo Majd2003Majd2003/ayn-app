@@ -14,7 +14,7 @@ dependencies:
   speech_to_text: ^6.6.0
   vibration: ^1.8.4
   permission_handler: ^11.3.1
-  geolocator: ^11.0.0
+  geolocator: ^10.1.0
   flutter_compass: ^0.8.0
   shared_preferences: ^2.2.2
   cupertino_icons: ^1.0.8
