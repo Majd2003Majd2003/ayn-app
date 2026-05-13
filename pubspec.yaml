@@ -1,0 +1,23 @@
+name: ayn_app
+description: AYN - Smart Vision Assistant for the Blind
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  flutter_tts: ^4.0.2
+  speech_to_text: ^7.0.0
+  vibration: ^2.0.0
+  permission_handler: ^11.3.1
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
