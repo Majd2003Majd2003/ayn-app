@@ -49,7 +49,7 @@ jobs:
           rm -rf lib
           cp -r /tmp/backup/lib ./lib
       
-      - name: Fix AndroidManifest for Speech Recognition
+      - name: Fix AndroidManifest
         run: |
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -57,7 +57,8 @@ jobs:
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.VIBRATE" />
               <uses-permission android:name="android.permission.INTERNET" />
-              <uses-permission android:name="android.permission.BLUETOOTH" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
               
               <queries>
                   <intent>
@@ -98,8 +99,6 @@ jobs:
               </application>
           </manifest>
           EOF
-          echo "AndroidManifest.xml updated successfully"
-          cat android/app/src/main/AndroidManifest.xml
       
       - name: Install dependencies
         run: flutter pub get
@@ -113,8 +112,3 @@ jobs:
           name: ayn-app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 90
-      
-      - name: Show APK info
-        run: |
-          echo "Build Successful!"
-          ls -lh build/app/outputs/flutter-apk/
