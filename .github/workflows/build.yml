@@ -29,25 +29,25 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # هذا الجزء هو "المفتاح" لحل مشكلة lStar وتوافق Kotlin
-      - name: Patch Gradle and Kotlin versions
+      - name: Patch Android Configuration
         run: |
-          # 1. تحديث compileSdkVersion إلى 34 لحل مشكلة lStar
-          sed -i 's/compileSdkVersion .*/compileSdkVersion 34/g' android/app/build.gradle
+          # التأكد من الانتقال للمسار الصحيح إذا لزم الأمر، أو تعديل الملفات في مكانها
+          # تحديث compileSdkVersion و targetSdkVersion إلى 34
+          find android/app/ -name "build.gradle" -exec sed -i 's/compileSdkVersion .*/compileSdkVersion 34/g' {} +
+          find android/app/ -name "build.gradle" -exec sed -i 's/targetSdkVersion .*/targetSdkVersion 34/g' {} +
           
-          # 2. تحديث إصدار Kotlin ليتوافق مع المكتبات الحديثة
-          # سنقوم بالبحث عن سطر ext.kotlin_version وتحديثه
+          # تحديث إصدار Kotlin في ملف build.gradle الرئيسي
           if [ -f "android/build.gradle" ]; then
             sed -i "s/ext.kotlin_version = .*/ext.kotlin_version = '1.9.20'/g" android/build.gradle
           fi
           
-          # 3. تحديث ملف settings.gradle إذا كان يحتوي على تعريف الإضافة
+          # تحديث إصدار Kotlin في settings.gradle (للمشاريع الأحدث)
           if [ -f "android/settings.gradle" ]; then
-            sed -i "s/id \"org.jetbrains.kotlin.android\" version .*/id \"org.jetbrains.kotlin.android\" version \"1.9.20\" apply false/g" android/settings.gradle
+            sed -i 's/id "org.jetbrains.kotlin.android" version "[^"]*"/id "org.jetbrains.kotlin.android" version "1.9.20"/g' android/settings.gradle
           fi
 
       - name: Build APK Release
-        run: flutter build apk --release
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
