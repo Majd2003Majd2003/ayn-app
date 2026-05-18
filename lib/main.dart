@@ -4,7 +4,6 @@ import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:vibration/vibration.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:flutter_compass/flutter_compass.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const AynApp());
@@ -282,7 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     
-    // القبلة من سوريا تقريباً نحو الجنوب الجنوبي الشرقي = حوالي 165 درجة
+    // القبلة من سوريا تقريباً نحو الجنوب الجنوبي الشرقي
     const double qiblaFromSyria = 165;
     
     final heading = _currentHeading!;
