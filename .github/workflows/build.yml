@@ -1,4 +1,4 @@
-name: Build AYN APK (Fresh Rebuild)
+name: Build AYN APK
 
 on:
   push:
@@ -7,13 +7,13 @@ on:
 
 jobs:
   build:
-    name: Clean Build and Fix Gradle
+    name: Build Android APK
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+      
       - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
@@ -25,44 +25,43 @@ jobs:
         with:
           flutter-version: '3.24.0'
           channel: 'stable'
-
-      - name: Reconstruct Project Structure
+      
+      - name: Backup my files
         run: |
-          # 1. نسخ الملفات الأساسية لمكان آمن مؤقتاً
-          mkdir -p /tmp/app_source
-          cp -r lib /tmp/app_source/ || true
-          cp pubspec.yaml /tmp/app_source/ || true
-          [ -d "assets" ] && cp -r assets /tmp/app_source/ || true
-
-          # 2. حذف كل شيء في المجلد الحالي لضمان النظافة
-          rm -rf *
-          rm -rf .??*
-
-          # 3. إنشاء مشروع Flutter جديد تماماً بنفس الاسم
-          # ملاحظة: استخدمنا اسم ayn_app لأنه الموصى به برمجياً (lowercase + underscore)
-          flutter create --project-name ayn_app --org com.majd .
-
-          # 4. استعادة كودك ومجلداتك الأصلية فوق المشروع الجديد
-          cp -r /tmp/app_source/lib .
-          cp /tmp/app_source/pubspec.yaml .
-          [ -d "/tmp/app_source/assets" ] && cp -r /tmp/app_source/assets . || true
-
-      - name: Install dependencies
-        run: flutter pub get
-
-      - name: Configure Android Permissions
+          mkdir /tmp/backup
+          cp pubspec.yaml /tmp/backup/
+          cp -r lib /tmp/backup/
+      
+      - name: Create fresh Flutter project
         run: |
-          # إضافة الأذونات الضرورية للميكروفون والبوصلة في الملف الجديد
+          cd ..
+          rm -rf ayn-app
+          flutter create --project-name ayn_app --org com.majd ayn-app
+          cd ayn-app
+      
+      - name: Restore my files
+        run: |
+          cp /tmp/backup/pubspec.yaml ./pubspec.yaml
+          rm -rf lib
+          cp -r /tmp/backup/lib ./lib
+      
+      - name: Fix AndroidManifest
+        run: |
           cat > android/app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android">
               <uses-permission android:name="android.permission.RECORD_AUDIO" />
               <uses-permission android:name="android.permission.VIBRATE" />
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
               <uses-permission android:name="android.permission.INTERNET" />
+              
               <queries>
-                  <intent><action android:name="android.speech.RecognitionService" /></intent>
-                  <intent><action android:name="android.intent.action.TTS_SERVICE" /></intent>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
               </queries>
+              
               <application
                   android:label="Ayn"
                   android:name="${applicationName}"
@@ -87,12 +86,29 @@ jobs:
               </application>
           </manifest>
           EOF
-
-      - name: Build APK
-        run: flutter build apk --release --no-tree-shake-icons
-
+      
+      - name: Fix Gradle compileSdk
+        run: |
+          # تعديل android/app/build.gradle لرفع compileSdk
+          sed -i 's/compileSdk = flutter.compileSdkVersion/compileSdk = 34/g' android/app/build.gradle
+          sed -i 's/compileSdkVersion flutter.compileSdkVersion/compileSdkVersion 34/g' android/app/build.gradle
+          sed -i 's/targetSdk = flutter.targetSdkVersion/targetSdk = 34/g' android/app/build.gradle
+          sed -i 's/targetSdkVersion flutter.targetSdkVersion/targetSdkVersion 34/g' android/app/build.gradle
+          sed -i 's/minSdk = flutter.minSdkVersion/minSdk = 23/g' android/app/build.gradle
+          sed -i 's/minSdkVersion flutter.minSdkVersion/minSdkVersion 23/g' android/app/build.gradle
+          
+          echo "=== Final build.gradle ==="
+          cat android/app/build.gradle
+      
+      - name: Install dependencies
+        run: flutter pub get
+      
+      - name: Build APK Release
+        run: flutter build apk --release
+      
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ayn-app-final-apk
+          name: ayn-app-release-apk
           path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 90
