@@ -483,3 +483,12 @@ class _HomeScreenState extends State<HomeScreen> {
               
               const Text(
                 "AYN v1.3 — Smart Edition",
+                style: TextStyle(color: Colors.white38, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
