@@ -1,320 +1,102 @@
-import 'package:flutter/material.dart';
-import 'package:flutter_tts/flutter_tts.dart';
-import 'package:speech_to_text/speech_to_text.dart' as stt;
-import 'package:vibration/vibration.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'package:flutter_compass/flutter_compass.dart';
-import 'dart:async';
+name: Build AYN APK
 
-void main() {
-  runApp(const AynApp());
-}
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
 
-class AynApp extends StatelessWidget {
-  const AynApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'AYN',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-        scaffoldBackgroundColor: Colors.black,
-      ),
-      home: const HomeScreen(),
-    );
-  }
-}
-
-class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
-
-  @override
-  State<HomeScreen> createState() => _HomeScreenState();
-}
-
-class _HomeScreenState extends State<HomeScreen> {
-  // تعريف المحركات الأساسية
-  final FlutterTts _tts = FlutterTts();
-  final stt.SpeechToText _speech = stt.SpeechToText();
-
-  // متغيرات الحالة
-  bool _speechAvailable = false;
-  bool _isListening = false;
-  bool _isSpeaking = false;
-  bool _autoListenEnabled = true;
-  String _lastWords = "";
-  String _statusMessage = "جاري التهيئة...";
-  double? _currentHeading;
-  
-  // لإدارة تدفق بيانات البوصلة لمنع تسريب الذاكرة
-  StreamSubscription? _compassSubscription;
-
-  @override
-  void initState() {
-    super.initState();
-    _initializeApp();
-  }
-
-  Future<void> _initializeApp() async {
-    await _requestPermissions();
-    await _setupTts();
-    await _setupSpeech();
-    _setupCompass();
-
-    setState(() {
-      _statusMessage = "جاهز";
-    });
-
-    // رسالة ترحيب مخصصة
-    await _speak("أهلاً يا مجد الدين، أنا عَيْن، النسخة المطورة مع البوصلة جاهزة لخدمتك");
-  }
-
-  Future<void> _requestPermissions() async {
-    // طلب الأذونات الضرورية للميكروفون والموقع (للبوصلة)
-    await [
-      Permission.microphone,
-      Permission.locationWhenInUse,
-    ].request();
-  }
-
-  Future<void> _setupTts() async {
-    await _tts.setLanguage("ar-SA");
-    await _tts.setSpeechRate(0.5);
-    await _tts.setVolume(1.0);
-
-    // عند انتهاء الكلام، يعود التطبيق للاستماع تلقائياً
-    _tts.setCompletionHandler(() {
-      setState(() => _isSpeaking = false);
-      if (_autoListenEnabled) {
-        Timer(const Duration(milliseconds: 600), () => _startContinuousListening());
-      }
-    });
-
-    _tts.setStartHandler(() {
-      setState(() => _isSpeaking = true);
-    });
-  }
-
-  Future<void> _setupSpeech() async {
-    try {
-      _speechAvailable = await _speech.initialize(
-        onError: (error) => _handleSpeechError(error.errorMsg),
-        onStatus: (status) => _handleSpeechStatus(status),
-      );
-    } catch (e) {
-      _speechAvailable = false;
-    }
-  }
-
-  void _handleSpeechStatus(String status) {
-    if (status == "done" || status == "notListening") {
-      setState(() => _isListening = false);
-      if (_autoListenEnabled && !_isSpeaking) {
-        Timer(const Duration(milliseconds: 700), () => _startContinuousListening());
-      }
-    }
-  }
-
-  void _handleSpeechError(String error) {
-    setState(() => _isListening = false);
-    // في حال حدوث خطأ (مثل الصمت)، نحاول إعادة تشغيل الميكروفون
-    if (_autoListenEnabled) {
-      Timer(const Duration(seconds: 1), () => _startContinuousListening());
-    }
-  }
-
-  void _setupCompass() {
-    _compassSubscription = FlutterCompass.events?.listen((event) {
-      if (mounted && event.heading != null) {
-        setState(() => _currentHeading = event.heading);
-      }
-    });
-  }
-
-  Future<void> _speak(String text) async {
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-    }
-    await _tts.speak(text);
-  }
-
-  Future<void> _vibrate({int duration = 100}) async {
-    if (await Vibration.hasVibrator() ?? false) {
-      Vibration.vibrate(duration: duration);
-    }
-  }
-
-  Future<void> _startContinuousListening() async {
-    if (!_speechAvailable || _isListening || _isSpeaking) return;
-
-    try {
-      setState(() {
-        _isListening = true;
-        _statusMessage = "أستمع...";
-      });
-
-      await _speech.listen(
-        onResult: (result) {
-          if (result.finalResult) {
-            final words = result.recognizedWords.trim();
-            if (words.isNotEmpty) {
-              setState(() {
-                _lastWords = words;
-                _isListening = false;
-              });
-              _processCommand(words);
-            }
-          }
-        },
-        localeId: "ar-SA",
-        cancelOnError: false,
-        listenMode: stt.ListenMode.confirmation,
-      );
-    } catch (e) {
-      setState(() => _isListening = false);
-    }
-  }
-
-  Future<void> _processCommand(String command) async {
-    final cmd = command.toLowerCase();
-    await _vibrate(); // تنبيه المستخدم بأنه تم استلام الأمر
-
-    if (cmd.contains("ساعه") || cmd.contains("ساعة") || cmd.contains("وقت")) {
-      await _tellTime();
-    } else if (cmd.contains("شمال") || cmd.contains("اتجاه") || cmd.contains("وين")) {
-      await _tellDirection();
-    } else if (cmd.contains("قبلة") || cmd.contains("القبلة")) {
-      await _tellQibla();
-    } else if (cmd.contains("تاريخ") || cmd.contains("يوم")) {
-      await _tellDate();
-    } else if (cmd.contains("توقف") || cmd.contains("اسكت")) {
-      await _tts.stop();
-      setState(() => _autoListenEnabled = false);
-      await _speak("تم إيقاف الاستماع التلقائي");
-    } else if (cmd.contains("مرحبا") || cmd.contains("هلا")) {
-      await _speak("أهلاً بك يا مجد، كيف أساعدك اليوم؟");
-    } else {
-      await _speak("لم أفهم هذا الأمر، جرب قول كم الساعة أو أين القبلة");
-    }
-  }
-
-  Future<void> _tellTime() async {
-    final now = DateTime.now();
-    final period = now.hour >= 12 ? "مساءً" : "صباحاً";
-    final hour = now.hour > 12 ? now.hour - 12 : (now.hour == 0 ? 12 : now.hour);
-    await _speak("الساعة الآن $hour و ${now.minute} دقيقة $period");
-  }
-
-  Future<void> _tellDate() async {
-    final now = DateTime.now();
-    final months = ["يناير", "فبراير", "مارس", "أبريل", "مايو", "يونيو", "يوليو", "أغسطس", "سبتمبر", "أكتوبر", "نوفمبر", "ديسمبر"];
-    await _speak("تاريخ اليوم هو ${now.day} من شهر ${months[now.month - 1]} لعام ${now.year}");
-  }
-
-  Future<void> _tellDirection() async {
-    if (_currentHeading == null) {
-      await _speak("عذراً، البوصلة غير جاهزة حالياً");
-      return;
-    }
-    final heading = _currentHeading!;
-    String dir = "";
-    if (heading < 22.5 || heading >= 337.5) dir = "الشمال";
-    else if (heading < 67.5) dir = "الشمال الشرقي";
-    else if (heading < 112.5) dir = "الشرق";
-    else if (heading < 157.5) dir = "الجنوب الشرقي";
-    else if (heading < 202.5) dir = "الجنوب";
-    else if (heading < 247.5) dir = "الجنوب الغربي";
-    else if (heading < 292.5) dir = "الغرب";
-    else dir = "الشمال الغربي";
-
-    await _speak("أنت تتجه الآن نحو $dir");
-  }
-
-  Future<void> _tellQibla() async {
-    if (_currentHeading == null) {
-      await _speak("البوصلة غير متوفرة");
-      return;
-    }
-    const double qiblaAngle = 165.0; // زاوية القبلة التقريبية لسوريا
-    final diff = (qiblaAngle - _currentHeading! + 360) % 360;
-
-    if (diff < 15 || diff > 345) {
-      await _speak("أنت الآن باتجاه القبلة تماماً، يمكنك الصلاة");
-      await _vibrate(duration: 500); // اهتزاز طويل للتأكيد
-    } else if (diff < 180) {
-      await _speak("القبلة على يمينك، استدر قليلاً لليمين");
-    } else {
-      await _speak("القبلة على يسارك، استدر قليلاً لليسار");
-    }
-  }
-
-  @override
-  void dispose() {
-    _compassSubscription?.cancel();
-    _tts.stop();
-    _speech.stop();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    Color themeColor = _isSpeaking ? Colors.purple : (_isListening ? Colors.red : Colors.blue);
-
-    return Scaffold(
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(color: Colors.black),
-        child: SafeArea(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Text("عَيْن", 
-                style: TextStyle(color: Colors.white, fontSize: 100, fontWeight: FontWeight.bold, letterSpacing: 10)
-              ),
-              const SizedBox(height: 50),
-              // الدائرة التفاعلية
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 400),
-                width: 220,
-                height: 220,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: themeColor.withOpacity(0.1),
-                  border: Border.all(color: themeColor, width: 6),
-                  boxShadow: [
-                    BoxShadow(color: themeColor.withOpacity(0.4), blurRadius: _isListening ? 40 : 20, spreadRadius: 5)
-                  ],
-                ),
-                child: Center(
-                  child: Icon(
-                    _isListening ? Icons.mic : (_isSpeaking ? Icons.volume_up : Icons.remove_red_eye), 
-                    color: Colors.white, 
-                    size: 100
-                  ),
-                ),
-              ),
-              const SizedBox(height: 50),
-              Text(_statusMessage, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w300)),
-              const SizedBox(height: 20),
-              if (_lastWords.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 40),
-                  child: Text(
-                    "سمعتك تقول: $_lastWords",
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white54, fontSize: 18, fontStyle: FontStyle.italic),
-                  ),
-                ),
-              const Spacer(),
-              const Text("AYN v1.3 — Compass Edition", style: TextStyle(color: Colors.white24, fontSize: 12)),
-              const SizedBox(height: 20),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
+jobs:
+  build:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+      
+      - name: Backup my files
+        run: |
+          mkdir -p /tmp/backup
+          cp pubspec.yaml /tmp/backup/
+          cp -r lib /tmp/backup/
+      
+      - name: Create fresh Flutter project
+        run: |
+          cd ..
+          rm -rf ayn-app
+          flutter create --project-name ayn_app --org com.majd ayn-app
+          cd ayn-app
+      
+      - name: Restore my files
+        run: |
+          cp /tmp/backup/pubspec.yaml ./pubspec.yaml
+          rm -rf lib
+          cp -r /tmp/backup/lib ./lib
+      
+      - name: Fix AndroidManifest
+        run: |
+          cat > android/app/src/main/AndroidManifest.xml << 'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.RECORD_AUDIO" />
+              <uses-permission android:name="android.permission.VIBRATE" />
+              <uses-permission android:name="android.permission.INTERNET" />
+              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+              
+              <queries>
+                  <intent>
+                      <action android:name="android.speech.RecognitionService" />
+                  </intent>
+                  <intent>
+                      <action android:name="android.intent.action.TTS_SERVICE" />
+                  </intent>
+              </queries>
+              
+              <application
+                  android:label="Ayn"
+                  android:name="${applicationName}"
+                  android:icon="@mipmap/ic_launcher">
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true"
+                      android:launchMode="singleTop"
+                      android:theme="@style/LaunchTheme"
+                      android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+                      android:hardwareAccelerated="true"
+                      android:windowSoftInputMode="adjustResize">
+                      <meta-data
+                        android:name="io.flutter.embedding.android.NormalTheme"
+                        android:resource="@style/NormalTheme" />
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+                  <meta-data android:name="flutterEmbedding" android:value="2" />
+              </application>
+          </manifest>
+          EOF
+      
+      - name: Install dependencies
+        run: flutter pub get
+      
+      - name: Build APK Release
+        run: flutter build apk --release
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ayn-app-release-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 90
